@@ -125,6 +125,17 @@ class CommentRepository:
             job.error = error
             await self.session.commit()
 
+    async def update_job_progress(
+        self, job_id: str, fetched: int | None = None, analyzed: int | None = None
+    ) -> None:
+        job = await self.session.get(Job, job_id)
+        if job:
+            if fetched is not None:
+                job.fetched_count = fetched
+            if analyzed is not None:
+                job.analyzed_count = analyzed
+            await self.session.commit()
+
     async def get_job(self, job_id: str) -> Job | None:
         return await self.session.get(Job, job_id)
 
@@ -152,6 +163,7 @@ class CommentRepository:
                 {
                     "video_id": video_id,
                     "comment_id": record["comment_id"],
+                    "parent_comment_id": record.get("parent_comment_id"),
                     "field_ids": field_ids_csv,
                     "record": json.dumps(record),
                 }

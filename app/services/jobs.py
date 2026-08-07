@@ -29,6 +29,12 @@ def _records_as_dicts(records) -> list[dict]:
     return [json.loads(r.record) for r in records]
 
 
+async def _report_progress(
+    comments_repo, job_id: str, fetched: int, analyzed: int
+) -> None:
+    await comments_repo.update_job_progress(job_id, fetched=fetched, analyzed=analyzed)
+
+
 async def analyze_project_video_pipeline(
     project_id: str, video_id: str, job_id: str, run_id: str
 ) -> dict:
@@ -49,6 +55,13 @@ async def analyze_project_video_pipeline(
             await session.commit()
 
             fetched = await fetch_comments(video_id)
+            logger.info(
+                "job %s: fetched %d comments+replies for video %s",
+                job_id,
+                len(fetched),
+                video_id,
+            )
+            await comments_repo.update_job_progress(job_id, fetched=len(fetched))
             rows = [dict(c, video_id=video_id) for c in fetched]
             await comments_repo.bulk_insert_comments(rows)
             await session.commit()
@@ -59,15 +72,29 @@ async def analyze_project_video_pipeline(
             stored = await comments_repo.get_comments_by_video(video_id)
             stored_likes = {c.comment_id: c.like_count for c in stored}
             plan = plan_incremental(fetched, analyzed_ids, stored_likes)
+            logger.info(
+                "job %s: plan new=%d changed=%d reuse=%d",
+                job_id,
+                len(plan["new_ids"]),
+                len(plan["changed_ids"]),
+                len(plan["reuse_ids"]),
+            )
 
             items = [
-                (c["comment_id"], c["text"])
+                (
+                    c["comment_id"],
+                    c["text"],
+                    c.get("parent_id"),
+                    c.get("parent_text"),
+                )
                 for c in fetched
                 if c["comment_id"] in set(plan["to_analyze"])
             ]
 
             new_items = [
-                (cid, text) for cid, text in items if cid in set(plan["new_ids"])
+                (cid, text)
+                for cid, text, _, _ in items
+                if cid in set(plan["new_ids"])
             ]
             if new_items:
                 try:
@@ -75,10 +102,25 @@ async def analyze_project_video_pipeline(
                     for (cid, _), vec in zip(new_items, vectors):
                         await comments_repo.set_comment_embedding(cid, vec)
                     await session.commit()
+                    logger.info(
+                        "job %s: embedded %d new comments",
+                        job_id,
+                        len(new_items),
+                    )
                 except Exception as exc:  # noqa: BLE001 - embeddings are best-effort
                     logger.warning("embedding failed, continuing: %s", exc)
 
-            records, record_field_ids = await analyze_comments(items, fields)
+            records, record_field_ids = await analyze_comments(
+                items,
+                fields,
+                on_progress=lambda done, total: _report_progress(
+                    comments_repo, job_id, len(fetched), done
+                ),
+            )
+            await comments_repo.update_job_progress(
+                job_id, fetched=len(fetched), analyzed=len(records)
+            )
+            logger.info("job %s: analyzed %d/%d comments", job_id, len(records), len(items))
 
             if records:
                 await projects_repo.bulk_insert_records(

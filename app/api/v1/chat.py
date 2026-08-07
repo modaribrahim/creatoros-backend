@@ -87,3 +87,31 @@ async def send_message(
     if not session:
         raise NotFoundError("chat session not found")
     return await chat_service.send_message(db, session, user["id"], body.content)
+
+
+@router.delete("/chat/sessions/{session_id}", status_code=200)
+async def delete_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    repo = ChatRepository(db)
+    if not await repo.get_session(session_id, user["id"]):
+        raise NotFoundError("chat session not found")
+    await repo.delete_session(session_id)
+    return {"deleted": session_id}
+
+
+@router.delete("/chat/sessions/{session_id}/messages/{message_id}", status_code=200)
+async def delete_message(
+    session_id: str,
+    message_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    repo = ChatRepository(db)
+    if not await repo.get_session(session_id, user["id"]):
+        raise NotFoundError("chat session not found")
+    if not await repo.delete_message(session_id, message_id):
+        raise NotFoundError("message not found")
+    return {"deleted": message_id}

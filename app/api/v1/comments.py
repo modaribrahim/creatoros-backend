@@ -20,5 +20,10 @@ async def job_status(
     if not job:
         raise NotFoundError("job not found")
     return JobStatus(
-        job_id=job.id, video_id=job.video_id, status=job.status, error=job.error
+        job_id=job.id,
+        video_id=job.video_id,
+        status=job.status,
+        error=job.error,
+        fetched_count=job.fetched_count,
+        analyzed_count=job.analyzed_count,
     )

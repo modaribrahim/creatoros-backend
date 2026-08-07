@@ -43,6 +43,25 @@ async def bootstrap_schema() -> None:
         except Exception:  # noqa: BLE001 - some hosts restrict extension creation
             logger.warning("could not CREATE EXTENSION vector (continuing)")
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight migrations: CREATE TABLE won't alter existing tables.
+        for ddl in (
+            (
+                "ALTER TABLE comment_records "
+                "ADD COLUMN IF NOT EXISTS parent_comment_id VARCHAR(64)"
+            ),
+            (
+                "ALTER TABLE jobs "
+                "ADD COLUMN IF NOT EXISTS fetched_count INTEGER DEFAULT 0"
+            ),
+            (
+                "ALTER TABLE jobs "
+                "ADD COLUMN IF NOT EXISTS analyzed_count INTEGER DEFAULT 0"
+            ),
+        ):
+            try:
+                await conn.execute(text(ddl))
+            except Exception:  # noqa: BLE001 - best-effort migration
+                logger.warning("schema migration skipped: %s", ddl)
     logger.info("database schema ready")
 
 

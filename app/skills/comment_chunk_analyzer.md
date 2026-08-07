@@ -12,6 +12,11 @@ vocabularies provided — these are the same for all comments so results can be 
 ...
 ```
 
+Some items are replies shown as `[replying to: <parent comment text>] <reply text>`.
+The text inside the bracket is the parent comment the reply responds to — use it as
+context to interpret the reply (short replies like "agree" often only make sense with it),
+but DO NOT analyze the bracketed parent text itself as if it were the comment.
+
 ## Output format
 
 Return ONLY valid JSON with this shape:

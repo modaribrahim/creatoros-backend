@@ -12,3 +12,5 @@ class JobStatus(BaseModel):
     video_id: str
     status: str
     error: str | None = None
+    fetched_count: int = 0
+    analyzed_count: int = 0

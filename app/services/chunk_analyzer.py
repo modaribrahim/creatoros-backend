@@ -106,11 +106,19 @@ def _normalize_record(raw: dict, fields: list[dict], index: int) -> dict:
 
 
 async def analyze_chunk(
-    items: list[tuple[str, str]], system_prompt: str, fields: list[dict]
+    items: list[tuple[str, str, str | None, str | None]],
+    system_prompt: str,
+    fields: list[dict],
 ) -> list[dict]:
     if not items:
         return []
-    payload = "\n".join(f"{i+1}. {text}" for i, (_, text) in enumerate(items))
+    lines = []
+    for i, (_, text, parent_id, parent_text) in enumerate(items):
+        if parent_text:
+            lines.append(f"{i+1}. [replying to: {parent_text}] {text}")
+        else:
+            lines.append(f"{i+1}. {text}")
+    payload = "\n".join(lines)
     raw = await chat(system_prompt, f"Comments ({len(items)}):\n{payload}", json_mode=True)
     try:
         data = json_repair.loads(_strip_fences(raw))
@@ -125,26 +133,41 @@ async def analyze_chunk(
             continue
         record = _normalize_record(r, fields, i + 1)
         record["comment_id"] = items[i][0]
+        if items[i][2]:
+            record["parent_comment_id"] = items[i][2]
+            record["parent_text"] = items[i][3]
+        else:
+            record["parent_comment_id"] = None
         out.append(record)
     return out
 
 
 async def analyze_comments(
-    items: list[tuple[str, str]], fields: list[dict]
+    items: list[tuple[str, str, str | None, str | None]],
+    fields: list[dict],
+    on_progress=None,
 ) -> tuple[list[dict], list[str]]:
     system_prompt = build_system_prompt(fields)
     chunks = [
         items[i : i + settings.chunk_size]
         for i in range(0, len(items), settings.chunk_size)
     ]
+    total = len(items)
 
     sem = asyncio.Semaphore(settings.max_concurrency)
+    results: list[list[dict]] = [None] * len(chunks)  # type: ignore[list-item]
 
-    async def run(chunk: list[tuple[str, str]]) -> list[dict]:
+    async def run(
+        idx: int, chunk: list[tuple[str, str, str | None, str | None]]
+    ) -> None:
         async with sem:
-            return await analyze_chunk(chunk, system_prompt, fields)
+            results[idx] = await analyze_chunk(chunk, system_prompt, fields)
+        if on_progress:
+            await on_progress(
+                sum(len(r) for r in results if r is not None), total
+            )
 
-    results = await asyncio.gather(*(run(c) for c in chunks))
+    await asyncio.gather(*(run(idx, c) for idx, c in enumerate(chunks)))
+
     records = [r for result in results for r in result]
-
     return records, [f["id"] for f in fields]

@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     max_concurrency: int = 4
     redis_url: str = "redis://localhost:6379/0"
     max_comments: int = 300
+    max_replies_per_thread: int = 50
     like_change_pct: float = 0.2
 
     jwt_secret: str = "dev-only-change-me-to-a-long-random-string-32-bytes"

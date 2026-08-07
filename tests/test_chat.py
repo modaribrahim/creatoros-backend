@@ -2,7 +2,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 
+from app.core.dependencies import get_current_user
+from app.main import app
 from app.services import chat as chat_service
 
 
@@ -59,6 +62,7 @@ class FakeChatRepo:
     def __init__(self):
         self.messages: list[dict] = []
         self.title = None
+        self.sessions: set[str] = set()
 
     async def set_title(self, session_id, title):
         self.title = title
@@ -71,6 +75,13 @@ class FakeChatRepo:
         return [
             SimpleNamespace(role=m["role"], content=m["content"]) for m in self.messages
         ]
+
+    async def delete_session(self, session_id):
+        self.sessions.discard(session_id)
+        return True
+
+    async def delete_message(self, session_id, message_id):
+        return True
 
 
 def _tool_call(name, args):
@@ -244,3 +255,117 @@ async def test_search_falls_back_to_like_ranked(monkeypatch):
     )
     hits = json.loads(result)
     assert hits[0]["score"] == 5.0
+
+
+# --- delete endpoints ------------------------------------------------------------
+
+
+def test_delete_session_endpoint(monkeypatch):
+    from app.api.v1 import chat as chat_module
+    from app.core.database import get_db
+
+    async def fake_current_user():
+        return {"id": "u1", "email": "a@b.co", "email_verified": True}
+
+    class StubRepo:
+        async def get_session(self, session_id, user_id):
+            return SimpleNamespace(id=session_id)
+
+        async def delete_session(self, session_id):
+            return True
+
+    async def fake_get_db():
+        yield None
+
+    monkeypatch.setattr(chat_module, "ChatRepository", lambda db: StubRepo())
+    app.dependency_overrides[get_current_user] = fake_current_user
+    app.dependency_overrides[get_db] = fake_get_db
+    try:
+        client = TestClient(app)
+        resp = client.delete("/api/v1/chat/sessions/s1")
+        assert resp.status_code == 200
+        assert resp.json() == {"deleted": "s1"}
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_session_endpoint_not_owned(monkeypatch):
+    from app.api.v1 import chat as chat_module
+    from app.core.database import get_db
+
+    async def fake_current_user():
+        return {"id": "u1", "email": "a@b.co", "email_verified": True}
+
+    class StubRepo:
+        async def get_session(self, session_id, user_id):
+            return None
+
+    async def fake_get_db():
+        yield None
+
+    monkeypatch.setattr(chat_module, "ChatRepository", lambda db: StubRepo())
+    app.dependency_overrides[get_current_user] = fake_current_user
+    app.dependency_overrides[get_db] = fake_get_db
+    try:
+        client = TestClient(app)
+        assert client.delete("/api/v1/chat/sessions/s1").status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_message_endpoint(monkeypatch):
+    from app.api.v1 import chat as chat_module
+    from app.core.database import get_db
+
+    async def fake_current_user():
+        return {"id": "u1", "email": "a@b.co", "email_verified": True}
+
+    class StubRepo:
+        async def get_session(self, session_id, user_id):
+            return SimpleNamespace(id=session_id)
+
+        async def delete_message(self, session_id, message_id):
+            return True
+
+    async def fake_get_db():
+        yield None
+
+    monkeypatch.setattr(chat_module, "ChatRepository", lambda db: StubRepo())
+    app.dependency_overrides[get_current_user] = fake_current_user
+    app.dependency_overrides[get_db] = fake_get_db
+    try:
+        client = TestClient(app)
+        resp = client.delete("/api/v1/chat/sessions/s1/messages/5")
+        assert resp.status_code == 200
+        assert resp.json() == {"deleted": 5}
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_message_endpoint_not_found(monkeypatch):
+    from app.api.v1 import chat as chat_module
+    from app.core.database import get_db
+
+    async def fake_current_user():
+        return {"id": "u1", "email": "a@b.co", "email_verified": True}
+
+    class StubRepo:
+        async def get_session(self, session_id, user_id):
+            return SimpleNamespace(id=session_id)
+
+        async def delete_message(self, session_id, message_id):
+            return False
+
+    async def fake_get_db():
+        yield None
+
+    monkeypatch.setattr(chat_module, "ChatRepository", lambda db: StubRepo())
+    app.dependency_overrides[get_current_user] = fake_current_user
+    app.dependency_overrides[get_db] = fake_get_db
+    try:
+        client = TestClient(app)
+        assert (
+            client.delete("/api/v1/chat/sessions/s1/messages/5").status_code == 404
+        )
+    finally:
+        app.dependency_overrides.clear()
