@@ -20,8 +20,8 @@ def get_chat_client() -> AsyncOpenAI:
     global _chat_client
     if _chat_client is None:
         _chat_client = AsyncOpenAI(
-            api_key=settings.analyze_api_key,
-            base_url=settings.analyze_base_url,
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
         )
     return _chat_client
 
