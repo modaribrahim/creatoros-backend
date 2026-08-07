@@ -257,6 +257,49 @@ async def test_search_falls_back_to_like_ranked(monkeypatch):
     assert hits[0]["score"] == 5.0
 
 
+async def test_search_supports_exact_field_filters(monkeypatch):
+    repo = FakeProjectRepo()
+    monkeypatch.setattr(chat_service, "ProjectRepository", lambda db: repo)
+    result = await chat_service._search(
+        None,
+        "u1",
+        {
+            "query": "",
+            "project_id": "p1",
+            "filters": [{"field": "sentiment_label", "op": "eq", "value": "negative"}],
+        },
+    )
+    hits = json.loads(result)
+    assert repo.semantic_called is True
+    assert hits[0]["score"] == 0.9
+
+
+async def test_search_requires_query_or_filter(monkeypatch):
+    monkeypatch.setattr(
+        chat_service, "ProjectRepository", lambda db: FakeProjectRepo()
+    )
+    result = await chat_service._search(
+        None, "u1", {"query": "", "project_id": "p1"}
+    )
+    assert json.loads(result) == {"error": "query or filters are required"}
+
+
+async def test_search_rejects_invalid_field_filter(monkeypatch):
+    monkeypatch.setattr(
+        chat_service, "ProjectRepository", lambda db: FakeProjectRepo()
+    )
+    result = await chat_service._search(
+        None,
+        "u1",
+        {
+            "query": "",
+            "project_id": "p1",
+            "filters": [{"field": "not_a_field", "op": "eq", "value": "x"}],
+        },
+    )
+    assert json.loads(result) == {"error": "query or filters are required"}
+
+
 # --- delete endpoints ------------------------------------------------------------
 
 

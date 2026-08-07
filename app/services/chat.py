@@ -9,6 +9,7 @@ from app.repositories.projects import ProjectRepository
 from app.schemas.chat import ChatReply
 from app.services.aggregator import aggregate_records
 from app.services.openrouter import chat_message, embed
+from app.services.search import validate_filters
 
 logger = logging.getLogger(__name__)
 
@@ -95,16 +96,20 @@ TOOL_DEFS = [
         "function": {
             "name": "search_comments",
             "description": (
-                "Semantic search over a project's analyzed comments. Use when the "
-                "user asks a topic/content question (e.g. 'what do people say "
-                "about pricing?') that needs reading actual comments."
+                "Find analyzed comments by topic OR by exact field filters. "
+                "Provide a natural-language `query` for semantic/topic search, "
+                "and/or `filters` for exact matches on stored fields "
+                "(e.g. audience_level=beginner, wants_follow_up=true, "
+                "sentiment_label=negative). Omit `query` to filter only by exact "
+                "fields. Combine both for precise, narrow results like "
+                "'beginner commenters who want a follow-up'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The natural-language question or topic.",
+                        "description": "Natural-language topic phrase (optional).",
                     },
                     "project_id": {
                         "type": "string",
@@ -118,8 +123,26 @@ TOOL_DEFS = [
                         "type": "integer",
                         "description": "Max comments to return (default 8).",
                     },
+                    "filters": {
+                        "type": "array",
+                        "description": (
+                            "Exact filters on stored fields. Each item is "
+                            "{'field': <field id>, 'op': 'eq'|'gte'|'lte', "
+                            "'value': <string or number>}. e.g. "
+                            "[{'field':'audience_level','op':'eq','value':'beginner'}]"
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {"type": "string"},
+                                "op": {"type": "string", "enum": ["eq", "gte", "lte"]},
+                                "value": {},
+                            },
+                            "required": ["field", "op", "value"],
+                        },
+                    },
                 },
-                "required": ["query", "project_id"],
+                "required": ["project_id"],
             },
         },
     },
@@ -217,19 +240,29 @@ async def _search(db: AsyncSession, user_id: str, args: dict) -> str:
         return json.dumps(checked)
     pid = checked["project"].id
     query = (args.get("query") or "").strip()
-    if not query:
-        return json.dumps({"error": "query is required"})
     fields = await repo.get_project_fields(pid)
     if not fields:
         return json.dumps({"error": "project has no analyzed comments yet"})
 
+    filters = validate_filters(args.get("filters") or [], fields)
+    if not query and not filters:
+        return json.dumps({"error": "query or filters are required"})
+
     video_id = args.get("video_id")
     limit = int(args.get("limit") or settings.chat_rag_limit)
+    query_vector = None
+    if query:
+        try:
+            query_vector = (await embed([query]))[0]
+        except Exception as exc:  # noqa: BLE001 - embeddings are best-effort
+            logger.warning("chat semantic search degraded to like-ranked: %s", exc)
     try:
-        vector = (await embed([query]))[0]
-        hits = await repo.semantic_search(pid, video_id, vector, None, limit)
-    except Exception as exc:  # noqa: BLE001 - embeddings are best-effort
-        logger.warning("chat semantic search degraded to like-ranked: %s", exc)
+        if query_vector is None and not filters:
+            hits = await repo.top_comments(pid, video_id, limit)
+        else:
+            hits = await repo.semantic_search(pid, video_id, query_vector, filters, limit)
+    except Exception as exc:  # noqa: BLE001 - semantic ranking is best-effort
+        logger.warning("chat search degraded to like-ranked: %s", exc)
         hits = await repo.top_comments(pid, video_id, limit)
     return json.dumps(hits)
 
@@ -284,8 +317,9 @@ async def send_message(
     messages += _conversation(await repo.get_messages(session_row.id))
 
     tools_used: list[str] = []
+    seen_calls: set[tuple] = set()
     reply = "I couldn't complete that in the allowed number of tool calls."
-    for _ in range(settings.chat_tool_limit):
+    for turn in range(settings.chat_tool_limit):
         message = await chat_message(messages, tools=TOOL_DEFS)
         tool_calls = getattr(message, "tool_calls", None)
         if not tool_calls:
@@ -311,14 +345,23 @@ async def send_message(
         )
         for tc in tool_calls:
             handler = TOOL_HANDLERS.get(tc.function.name)
-            if not handler:
-                result = json.dumps({"error": f"unknown tool {tc.function.name}"})
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            signature = (tc.function.name, json.dumps(args, sort_keys=True))
+            if signature in seen_calls:
+                result = (
+                    "You already called this exact tool with the same arguments. "
+                    "You are looping. Stop calling tools and answer the user now "
+                    "from the data you already have."
+                )
             else:
-                try:
-                    args = json.loads(tc.function.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                result = await handler(db, user_id, args)
+                seen_calls.add(signature)
+                if not handler:
+                    result = json.dumps({"error": f"unknown tool {tc.function.name}"})
+                else:
+                    result = await handler(db, user_id, args)
             tools_used.append(tc.function.name)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
