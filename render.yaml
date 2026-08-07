@@ -21,7 +21,7 @@ services:
     healthCheckPath: /health
     buildCommand: pip install -r requirements.txt
     startCommand: >-
-      celery -A app.services.jobs:celery_app worker --loglevel=info --concurrency=2
+      celery -A app.services.jobs:celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=25
       &
       uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
