@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     embed_model: str = "openai/text-embedding-3-small"
     analyze_api_key: str = ""
     analyze_base_url: str = "https://api.mixroute.ai/v1"
-    analyze_model: str = "deepseek/deepseek-v4-pro"
+    analyze_model: str = "deepseek/deepseek-v4-flash-0731"
     embedding_dim: int = 1536
     chunk_size: int = 50
     max_concurrency: int = 4
