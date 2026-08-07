@@ -20,7 +20,13 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.auto_create_tables:
-        await bootstrap_schema()
+        # Never let a DB hiccup prevent the server from binding a port:
+        # Render's health check requires the process to accept traffic, so
+        # start cleanly and leave schema errors to the health/log path.
+        try:
+            await bootstrap_schema()
+        except Exception:  # keep serving even if DB is down
+            logger.exception("startup schema bootstrap failed")
     yield
 
 
@@ -109,4 +115,26 @@ async def unhandled_error_handler(_: Request, exc: Exception):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from redis.asyncio import Redis
+    from sqlalchemy import text
+
+    from app.core.config import settings
+    from app.core.database import engine
+
+    checks: dict = {"status": "ok", "database": "unknown", "redis": "unknown"}
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:  # noqa: BLE001
+        checks["database"] = "error"
+        checks["status"] = "degraded"
+    try:
+        client = Redis.from_url(settings.redis_url, socket_connect_timeout=5)
+        await client.ping()
+        await client.aclose()
+        checks["redis"] = "ok"
+    except Exception:  # noqa: BLE001
+        checks["redis"] = "error"
+        checks["status"] = "degraded"
+    return checks

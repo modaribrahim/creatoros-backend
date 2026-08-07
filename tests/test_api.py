@@ -11,7 +11,11 @@ from app.main import app, app_error_handler
 
 def test_health():
     client = TestClient(app)
-    assert client.get("/health").json() == {"status": "ok"}
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] in {"ok", "degraded"}
+    assert set(body) >= {"status", "database", "redis"}
 
 
 def test_validation_error_envelope():
