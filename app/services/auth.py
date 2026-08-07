@@ -71,8 +71,8 @@ async def login(session: AsyncSession, email: str, password: str) -> AuthRespons
     user = await repo.get_by_email(email)
     if not user or not verify_password(password, user.password_hash):
         raise UnauthorizedError("invalid email or password")
-    if not user.email_verified:
-        raise ForbiddenError("email not verified; check your inbox")
+    # if not user.email_verified:
+    #     raise ForbiddenError("email not verified; check your inbox")
     refresh_token = generate_token()
     await repo.create_refresh_token(user.id, sha256(refresh_token))
     return AuthResponse(
