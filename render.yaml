@@ -1,0 +1,53 @@
+# Render Blueprint for CreatorOS — single-box demo (API + Celery worker).
+#
+# External deps you create once (not part of this blueprint):
+#   - Neon Postgres + pgvector  -> DATABASE_URL   (postgresql+asyncpg://...?sslmode=require)
+#   - Upstash Redis             -> REDIS_URL      (rediss://...)
+#
+# Secrets are marked `sync: false` so Render prompts you for their values
+# in the dashboard on first deploy.
+#
+# Deploy: push this repo to GitHub, then in Render
+#   New + -> Blueprint -> connect repo -> Create Resources.
+# Render runs the buildCommand, then the single startCommand below boots
+# both Celery and uvicorn in one free process.
+
+services:
+  - type: web
+    name: creatoros-api
+    runtime: python
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      celery -A app.services.jobs:celery_app worker --loglevel=info --concurrency=2
+      &
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ANALYZE_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ANALYZE_BASE_URL
+        value: https://api.mixroute.ai/v1
+      - key: ANALYZE_MODEL
+        value: deepseek-v4-flash
+      - key: EMBED_MODEL
+        value: openai/text-embedding-3-small
+      - key: EMBEDDING_DIM
+        value: "1536"
+      - key: AUTO_CREATE_TABLES
+        value: "true"

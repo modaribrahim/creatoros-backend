@@ -1,0 +1,20 @@
+# Secrets — never commit
+.env
+render.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.python-version
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
