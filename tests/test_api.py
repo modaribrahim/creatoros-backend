@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.dependencies import get_current_user
 from app.core.exceptions import AppError, NotFoundError
 from app.main import app, app_error_handler
 
@@ -91,6 +90,7 @@ def test_project_endpoints_run_ownership_check():
 
 def test_projects_scope_to_current_user(monkeypatch):
     """A user cannot read a project owned by another user."""
+    from app.core.dependencies import get_current_user
     from app.repositories.projects import ProjectRepository
 
     async def fake_current_user():
@@ -112,5 +112,55 @@ def test_projects_scope_to_current_user(monkeypatch):
     try:
         client = TestClient(app)
         assert client.get("/api/v1/projects/other-user-project").status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_project_fields_put_returns_field_out_shape(monkeypatch):
+    """The fields PUT must return a list of ProjectFieldOut, not raw ids."""
+    from app.core.dependencies import get_current_user, get_db
+    from app.repositories.projects import ProjectRepository
+
+    async def fake_current_user():
+        return {"id": "user-1", "email": "a@b.co", "email_verified": True}
+
+    class FakeSession:
+        async def scalar(self, stmt):
+            return SimpleNamespace(id="project-1", user_id="user-1", name="p")
+
+    async def fake_get_db():
+        yield FakeSession()
+
+    async def fake_has_fields(self, project_id):
+        return False
+
+    async def fake_set_fields(self, project_id, field_ids):
+        return None
+
+    async def fake_get_field_ids(self, project_id):
+        return ["sentiment_label", "priority"]
+
+    async def fake_get_fields(db):
+        return [{"id": "sentiment_label"}, {"id": "priority"}]
+
+    monkeypatch.setattr(ProjectRepository, "has_project_fields", fake_has_fields)
+    monkeypatch.setattr(ProjectRepository, "set_project_fields", fake_set_fields)
+    monkeypatch.setattr(ProjectRepository, "get_project_field_ids", fake_get_field_ids)
+    monkeypatch.setattr(
+        "app.api.v1.projects.get_fields", fake_get_fields
+    )
+    app.dependency_overrides[get_current_user] = fake_current_user
+    app.dependency_overrides[get_db] = fake_get_db
+    try:
+        client = TestClient(app)
+        resp = client.put(
+            "/api/v1/projects/project-1/fields",
+            json={"field_ids": ["sentiment_label", "priority"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == [
+            {"field_id": "sentiment_label", "enabled": True},
+            {"field_id": "priority", "enabled": True},
+        ]
     finally:
         app.dependency_overrides.clear()

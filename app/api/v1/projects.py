@@ -81,7 +81,8 @@ async def setup_project_fields(
     if unknown:
         raise NotFoundError(f"unknown fields: {sorted(unknown)}")
     await repo.set_project_fields(project_id, body.field_ids)
-    return await repo.get_project_field_ids(project_id)
+    ids = await repo.get_project_field_ids(project_id)
+    return [ProjectFieldOut(field_id=fid, enabled=True) for fid in ids]
 
 
 @router.post(
