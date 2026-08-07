@@ -134,16 +134,20 @@ def test_project_fields_put_returns_field_out_shape(monkeypatch):
     async def fake_has_fields(self, project_id):
         return False
 
+    async def fake_has_runs(self, project_id):
+        return False
+
     async def fake_set_fields(self, project_id, field_ids):
         return None
 
     async def fake_get_field_ids(self, project_id):
         return ["sentiment_label", "priority"]
 
-    async def fake_get_fields(db):
+    async def fake_get_fields(db, user_id=None):
         return [{"id": "sentiment_label"}, {"id": "priority"}]
 
     monkeypatch.setattr(ProjectRepository, "has_project_fields", fake_has_fields)
+    monkeypatch.setattr(ProjectRepository, "has_project_runs", fake_has_runs)
     monkeypatch.setattr(ProjectRepository, "set_project_fields", fake_set_fields)
     monkeypatch.setattr(ProjectRepository, "get_project_field_ids", fake_get_field_ids)
     monkeypatch.setattr(
@@ -162,5 +166,43 @@ def test_project_fields_put_returns_field_out_shape(monkeypatch):
             {"field_id": "sentiment_label", "enabled": True},
             {"field_id": "priority", "enabled": True},
         ]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_project_fields_locked_after_first_run(monkeypatch):
+    """Once a project has a run, its field config is locked."""
+    from app.core.dependencies import get_current_user, get_db
+    from app.repositories.projects import ProjectRepository
+
+    async def fake_current_user():
+        return {"id": "user-1", "email": "a@b.co", "email_verified": True}
+
+    class FakeSession:
+        async def scalar(self, stmt):
+            return SimpleNamespace(id="project-1", user_id="user-1", name="p")
+
+    async def fake_get_db():
+        yield FakeSession()
+
+    async def fake_has_runs(self, project_id):
+        return True
+
+    monkeypatch.setattr(ProjectRepository, "has_project_runs", fake_has_runs)
+    app.dependency_overrides[get_current_user] = fake_current_user
+    app.dependency_overrides[get_db] = fake_get_db
+    try:
+        client = TestClient(app)
+        resp = client.put(
+            "/api/v1/projects/project-1/fields",
+            json={"field_ids": ["sentiment_label"]},
+        )
+        assert resp.status_code == 409
+        assert resp.json() == {
+            "error": {
+                "code": "CONFLICT",
+                "message": "project fields are locked after the first analysis",
+            }
+        }
     finally:
         app.dependency_overrides.clear()

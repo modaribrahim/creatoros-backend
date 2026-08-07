@@ -74,9 +74,9 @@ async def setup_project_fields(
     project = await repo.get_project(project_id, user["id"])
     if not project:
         raise NotFoundError("project not found")
-    if await repo.has_project_fields(project_id):
-        raise ConflictError("project fields are locked after setup")
-    catalog_ids = {f["id"] for f in await get_fields(db)}
+    if await repo.has_project_runs(project_id):
+        raise ConflictError("project fields are locked after the first analysis")
+    catalog_ids = {f["id"] for f in await get_fields(db, user["id"])}
     unknown = set(body.field_ids) - catalog_ids
     if unknown:
         raise NotFoundError(f"unknown fields: {sorted(unknown)}")

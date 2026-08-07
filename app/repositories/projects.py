@@ -1,7 +1,7 @@
 import json
 from uuid import uuid4
 
-from sqlalchemy import and_, cast, select
+from sqlalchemy import and_, cast, delete, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +53,9 @@ class ProjectRepository:
 
     # field snapshot --------------------------------------------------------
     async def set_project_fields(self, project_id: str, field_ids: list[str]) -> None:
+        await self.session.execute(
+            delete(ProjectField).where(ProjectField.project_id == project_id)
+        )
         for fid in field_ids:
             self.session.add(
                 ProjectField(project_id=project_id, field_id=fid, enabled=True)
@@ -65,6 +68,13 @@ class ProjectRepository:
                 select(ProjectField.id)
                 .where(ProjectField.project_id == project_id)
                 .limit(1)
+            )
+        )
+
+    async def has_project_runs(self, project_id: str) -> bool:
+        return bool(
+            await self.session.scalar(
+                select(Run.id).where(Run.project_id == project_id).limit(1)
             )
         )
 

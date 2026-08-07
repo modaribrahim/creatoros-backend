@@ -209,6 +209,9 @@ class AnalysisField(Base):
     type: Mapped[str] = mapped_column(String(16))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sort: Mapped[int] = mapped_column(Integer, default=0)
+    user_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("users.id"), nullable=True, index=True
+    )
 
 
 class AnalysisFieldOption(Base):

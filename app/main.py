@@ -57,6 +57,10 @@ async def bootstrap_schema() -> None:
                 "ALTER TABLE jobs "
                 "ADD COLUMN IF NOT EXISTS analyzed_count INTEGER DEFAULT 0"
             ),
+            (
+                "ALTER TABLE analysis_fields "
+                "ADD COLUMN IF NOT EXISTS user_id VARCHAR(64)"
+            ),
         ):
             try:
                 await conn.execute(text(ddl))
