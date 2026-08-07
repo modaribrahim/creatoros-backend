@@ -47,6 +47,22 @@ async def analyze_project_video_pipeline(
             await comments_repo.update_job_status(job_id, "running")
             await session.commit()
 
+            project = await projects_repo.get_project(project_id)
+            if project is None:
+                await comments_repo.update_job_status(
+                    job_id, "cancelled", error="project deleted while job ran"
+                )
+                await session.commit()
+                logger.info("job %s: project deleted, cancelling", job_id)
+                return {
+                    "job_id": job_id,
+                    "status": "cancelled",
+                    "fetched": 0,
+                    "new": 0,
+                    "changed": 0,
+                    "reused": 0,
+                }
+
             await seed_fields(session)
             fields = await projects_repo.get_project_fields(project_id)
             field_ids = [f["id"] for f in fields]

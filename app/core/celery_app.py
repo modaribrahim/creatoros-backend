@@ -40,7 +40,7 @@ celery_app.conf.update(
     # become a pause rather than a permanently stuck job.
     task_acks_late=True,
     task_reject_on_worker_lost=True,
-    task_acks_on_failure_or_timeout=False,
+    task_acks_on_failure_or_timeout=True,
     worker_prefetch_multiplier=1,
     broker_transport_options={"visibility_timeout": 600},
 )
