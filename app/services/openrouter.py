@@ -34,17 +34,19 @@ async def embed(texts: list[str]) -> list[list[float]]:
     return [item.embedding for item in response.data]
 
 
-async def chat(system: str, user: str) -> str:
-    response = await get_chat_client().chat.completions.create(
-        model=settings.analyze_model,
-        messages=[
+async def chat(system: str, user: str, *, json_mode: bool = False) -> str:
+    kwargs: dict = {
+        "model": settings.analyze_model,
+        "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0.0,
-        timeout=300,
-        response_format={"type": "json_object"},
-    )
+        "temperature": 0.0,
+        "timeout": 300,
+    }
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+    response = await get_chat_client().chat.completions.create(**kwargs)
     return response.choices[0].message.content or ""
 
 

@@ -62,7 +62,7 @@ def test_validate_filters_enforces_max_three():
 
 
 def test_generate_plan_parses_llm_json(monkeypatch):
-    async def fake_chat(system, user):
+    async def fake_chat(system, user, *, json_mode=False):
         return (
             '{"search_text": "pricing complaints", "filters": '
             '[{"field": "sentiment_label", "op": "eq", "value": "negative"}]}'
@@ -77,7 +77,7 @@ def test_generate_plan_parses_llm_json(monkeypatch):
 
 
 def test_generate_plan_tolerates_bad_llm_output(monkeypatch):
-    async def fake_chat(system, user):
+    async def fake_chat(system, user, *, json_mode=False):
         return "not json at all"
 
     monkeypatch.setattr("app.services.search.chat", fake_chat)

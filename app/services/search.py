@@ -52,7 +52,7 @@ def _fields_block(fields: list[dict]) -> str:
 async def generate_plan(query: str, fields: list[dict]) -> dict:
     """Ask the LLM to turn a user question into a search plan."""
     prompt = PLANNER_PROMPT.replace("<fields>", _fields_block(fields))
-    raw = await chat(prompt, f"Question: {query}")
+    raw = await chat(prompt, f"Question: {query}", json_mode=True)
     try:
         data = json_repair.loads(raw)
     except (json.JSONDecodeError, TypeError):

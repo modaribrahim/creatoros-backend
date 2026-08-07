@@ -111,7 +111,7 @@ async def analyze_chunk(
     if not items:
         return []
     payload = "\n".join(f"{i+1}. {text}" for i, (_, text) in enumerate(items))
-    raw = await chat(system_prompt, f"Comments ({len(items)}):\n{payload}")
+    raw = await chat(system_prompt, f"Comments ({len(items)}):\n{payload}", json_mode=True)
     try:
         data = json_repair.loads(_strip_fences(raw))
     except json.JSONDecodeError:
