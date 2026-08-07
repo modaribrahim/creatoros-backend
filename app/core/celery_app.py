@@ -33,4 +33,14 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
+    # Fault tolerance: with acks_late the worker only acks a task after it
+    # finishes, so if the process dies mid-run the broker resends the task
+    # (instead of it being "acked" and lost forever). reject_on_worker_lost
+    # requeues work in flight when a worker is killed, so cold-starts/restarts
+    # become a pause rather than a permanently stuck job.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    task_acks_on_failure_or_timeout=False,
+    worker_prefetch_multiplier=1,
+    broker_transport_options={"visibility_timeout": 600},
 )

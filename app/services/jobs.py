@@ -195,3 +195,56 @@ class AnalyzeProjectVideoTask(AsyncTask):
 
 
 analyze_project_video = celery_app.register_task(AnalyzeProjectVideoTask())
+
+
+async def _stuck_jobs(session) -> list[tuple[str, str, str, str]]:
+    """Return (job_id, project_id, video_id, run_id) for orphaned 'running' jobs."""
+    from sqlalchemy import select
+
+    from app.models import Job, Run
+
+    job_rows = await session.execute(select(Job).where(Job.status == "running"))
+    out: list[tuple[str, str, str, str]] = []
+    for job in job_rows.scalars().all():
+        if not job.project_id:
+            continue
+        run_row = await session.execute(select(Run).where(Run.job_id == job.id))
+        run = run_row.scalars().first()
+        if not run:
+            continue
+        out.append((job.id, job.project_id, job.video_id, run.id))
+    return out
+
+
+async def _requeue_stuck_jobs() -> None:
+    """On worker boot, push any orphaned 'running' jobs back to 'pending' and
+    re-enqueue them. A single-worker free instance can only have had a 'running'
+    job owned by the now-dead process, so resetting is safe. The analysis
+    pipeline is incremental/idempotent, so re-running closes only the remaining
+    chunk rather than redoing completed work.
+    """
+    engine, session_factory = _session_factory()
+    try:
+        async with session_factory() as session:
+            for job_id, project_id, video_id, run_id in await _stuck_jobs(session):
+                await CommentRepository(session).update_job_status(job_id, "pending")
+                await session.commit()
+                analyze_project_video.delay(project_id, video_id, job_id, run_id)
+                logger.info("requeued stuck job %s for video %s", job_id, video_id)
+    finally:
+        await engine.dispose()
+
+
+from celery.signals import worker_ready
+
+
+@worker_ready.connect
+def _on_worker_ready(sender=None, **kwargs):
+    """Requeue orphaned 'running' jobs when the worker boots."""
+    logger.info("worker ready: recovering stuck jobs")
+    try:
+        import asyncio
+
+        asyncio.run(_requeue_stuck_jobs())
+    except Exception:
+        logger.exception("failed to recover stuck jobs")
