@@ -1,8 +1,15 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   api:
     build: .
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    logging: *logging
     environment: &appenv
       # Point at your existing managed services (Neon / Upstash) — same URLs
       # the app used on Render. No migration needed.
@@ -27,12 +34,14 @@ services:
     restart: unless-stopped
     command: celery -A app.services.jobs:celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=25
     environment: *appenv
+    logging: *logging
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - api
+    logging: *logging
     ports:
       - "80:80"
       - "443:443"
