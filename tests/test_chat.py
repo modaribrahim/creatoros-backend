@@ -24,6 +24,9 @@ class FakeProjectRepo:
     async def get_project_videos(self, project_id):
         return [SimpleNamespace(video_id="v1", created_at=None)]
 
+    async def get_project_videos_with_titles(self, project_id):
+        return [{"video_id": "v1", "title": "My Video", "channel_name": "Chan"}]
+
     async def get_all_project_records(self, project_id):
         return [SimpleNamespace(record=json.dumps({"sentiment_label": "negative"}))]
 
@@ -191,8 +194,10 @@ async def test_system_prompt_injects_project_scope(patch_all):
     prompt = await chat_service._system_prompt(
         None, "u1", SimpleNamespace(id="s1", title="t", project_id="p1")
     )
-    assert "project_id 'p1'" in prompt
+    assert "project_id='p1'" in prompt
     assert "Launch" in prompt
+    assert "My Video" in prompt
+    assert "sentiment_label" in prompt
 
 
 @pytest.mark.asyncio

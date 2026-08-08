@@ -13,7 +13,7 @@ from app.services.chunk_analyzer import analyze_comments
 from app.services.fields import seed_fields
 from app.services.incremental import plan_incremental
 from app.services.openrouter import embed
-from app.services.youtube import fetch_comments
+from app.services.youtube import fetch_comments, fetch_video_info
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,16 @@ async def analyze_project_video_pipeline(
             fields = await projects_repo.get_project_fields(project_id)
             field_ids = [f["id"] for f in fields]
 
-            await comments_repo.upsert_video(video_id)
+            try:
+                video_info = await fetch_video_info(video_id)
+            except Exception as exc:  # noqa: BLE001 - metadata is best-effort
+                logger.warning("failed to fetch video metadata: %s", exc)
+                video_info = {}
+            await comments_repo.upsert_video(
+                video_id,
+                title=video_info.get("title"),
+                channel_name=video_info.get("channel_name"),
+            )
             await session.commit()
 
             fetched = await fetch_comments(video_id)

@@ -15,6 +15,7 @@ from app.models import (
     ProjectField,
     ProjectVideo,
     Run,
+    Video,
 )
 
 
@@ -134,6 +135,22 @@ class ProjectRepository:
             select(ProjectVideo).where(ProjectVideo.project_id == project_id)
         )
         return list(result.all())
+
+    async def get_project_videos_with_titles(self, project_id: str) -> list[dict]:
+        """Project videos joined with stored video metadata (title/channel)."""
+        result = await self.session.execute(
+            select(ProjectVideo, Video)
+            .join(Video, Video.video_id == ProjectVideo.video_id)
+            .where(ProjectVideo.project_id == project_id)
+        )
+        return [
+            {
+                "video_id": pv.video_id,
+                "title": v.title,
+                "channel_name": v.channel_name,
+            }
+            for pv, v in result.all()
+        ]
 
     # runs -----------------------------------------------------------------
     async def create_run(self, project_id: str, video_id: str, job_id: str) -> Run:

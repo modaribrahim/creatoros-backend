@@ -9,13 +9,17 @@ from app.repositories.projects import ProjectRepository
 from app.schemas.chat import ChatReply
 from app.services.aggregator import aggregate_records
 from app.services.openrouter import chat_message, embed
-from app.services.search import validate_filters
+from app.services.search import _fields_block, validate_filters
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are CreatorOS Chat, an assistant that helps a creator understand their
 YouTube comments. You have tools to read a project's analytics and to search its
 analyzed comments.
+
+The current project's available fields (id, type, options) and videos are listed
+in the project context below. Use ONLY those field ids when filtering, and ONLY
+those video ids when restricting to a video.
 
 Rules:
 - Only access the project(s) the user owns. The tools verify ownership; if a tool
@@ -84,7 +88,10 @@ TOOL_DEFS = [
                     },
                     "video_id": {
                         "type": "string",
-                        "description": "The video id (YouTube id).",
+                        "description": (
+                            "The video id (YouTube id) — map from the project "
+                            "context's videos list if the user names a video."
+                        ),
                     },
                 },
                 "required": ["project_id", "video_id"],
@@ -98,11 +105,10 @@ TOOL_DEFS = [
             "description": (
                 "Find analyzed comments by topic OR by exact field filters. "
                 "Provide a natural-language `query` for semantic/topic search, "
-                "and/or `filters` for exact matches on stored fields "
-                "(e.g. audience_level=beginner, wants_follow_up=true, "
-                "sentiment_label=negative). Omit `query` to filter only by exact "
-                "fields. Combine both for precise, narrow results like "
-                "'beginner commenters who want a follow-up'."
+                "and/or `filters` for exact matches on stored fields. Use ONLY "
+                "field ids and enum values listed in the project context. "
+                "Omit `query` to filter only by exact fields. Combine both for "
+                "precise, narrow results (e.g. negative sentiment + high priority)."
             ),
             "parameters": {
                 "type": "object",
@@ -117,7 +123,10 @@ TOOL_DEFS = [
                     },
                     "video_id": {
                         "type": "string",
-                        "description": "Optional: restrict to one video.",
+                        "description": (
+                            "Optional: restrict to one video. Use a video_id "
+                            "from the project context (not a title)."
+                        ),
                     },
                     "limit": {
                         "type": "integer",
@@ -127,9 +136,9 @@ TOOL_DEFS = [
                         "type": "array",
                         "description": (
                             "Exact filters on stored fields. Each item is "
-                            "{'field': <field id>, 'op': 'eq'|'gte'|'lte', "
-                            "'value': <string or number>}. e.g. "
-                            "[{'field':'audience_level','op':'eq','value':'beginner'}]"
+                            "{'field': <field id from project context>, "
+                            "'op': 'eq'|'gte'|'lte', "
+                            "'value': <string or number>}."
                         ),
                         "items": {
                             "type": "object",
@@ -178,7 +187,7 @@ async def _analytics(db: AsyncSession, user_id: str, args: dict) -> str:
         return json.dumps(checked)
     project = checked["project"]
     pid = project.id
-    videos = await repo.get_project_videos(pid)
+    videos = await repo.get_project_videos_with_titles(pid)
     records = await repo.get_all_project_records(pid)
     field_ids = await repo.get_project_field_ids(pid)
     return json.dumps(
@@ -186,7 +195,7 @@ async def _analytics(db: AsyncSession, user_id: str, args: dict) -> str:
             "project_id": pid,
             "project_name": project.name,
             "video_count": len(videos),
-            "videos": [v.video_id for v in videos],
+            "videos": videos,
             "comment_count": len(records),
             "aggregate": json.loads(project.aggregate) if project.aggregate else {},
             "coverage": _coverage(records, field_ids),
@@ -199,10 +208,8 @@ async def _videos(db: AsyncSession, user_id: str, args: dict) -> str:
     checked = await _guard(db, user_id, args.get("project_id"))
     if "error" in checked:
         return json.dumps(checked)
-    videos = await repo.get_project_videos(checked["project"].id)
-    return json.dumps(
-        [{"video_id": v.video_id, "added_at": v.created_at.isoformat()} for v in videos]
-    )
+    videos = await repo.get_project_videos_with_titles(checked["project"].id)
+    return json.dumps(videos)
 
 
 async def _insights(db: AsyncSession, user_id: str, args: dict) -> str:
@@ -286,14 +293,21 @@ def _conversation(history) -> list[dict]:
 async def _system_prompt(db: AsyncSession, user_id: str, session_row) -> str:
     prompt = SYSTEM_PROMPT
     if session_row.project_id:
-        project = await ProjectRepository(db).get_project(
-            session_row.project_id, user_id
-        )
+        repo = ProjectRepository(db)
+        project = await repo.get_project(session_row.project_id, user_id)
         if project:
+            fields = await repo.get_project_fields(session_row.project_id)
+            videos = await repo.get_project_videos_with_titles(session_row.project_id)
+            field_block = _fields_block(fields) if fields else "(no fields)"
+            video_block = "\n".join(
+                f"- video_id={v['video_id']}  title={v['title'] or '(unknown)'}"
+                for v in videos
+            ) or "(no videos yet)"
             prompt += (
-                f"\n\nYou are currently scoped to project {project.id} "
-                f"(name: {project.name!r}). Use project_id {project.id!r} in your "
-                "tool calls unless the user explicitly mentions a different project."
+                f"\n\nProject context for {project.name!r} (project_id="
+                f"{project.id!r}):\n"
+                f"Fields you may filter on (use these exact ids):\n{field_block}\n"
+                f"Videos in this project (use these exact ids):\n{video_block}"
             )
         else:
             prompt += (

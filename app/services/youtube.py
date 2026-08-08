@@ -4,6 +4,7 @@ from app.core.config import settings
 
 THREADS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 REPLIES_URL = "https://www.googleapis.com/youtube/v3/comments"
+VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
 def _parse_comment(comment: dict) -> dict:
@@ -119,3 +120,22 @@ async def fetch_comments(video_id: str, max_comments: int | None = None) -> list
                 break
 
     return comments
+
+
+async def fetch_video_info(video_id: str) -> dict:
+    """Fetch a video's title + channel name (best-effort, for chat context)."""
+    params = {
+        "part": "snippet",
+        "id": video_id,
+        "key": settings.youtube_api_key,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        data = await _get_json(client, VIDEOS_URL, params)
+    items = data.get("items") or []
+    if not items:
+        return {}
+    snippet = items[0].get("snippet", {})
+    return {
+        "title": snippet.get("title"),
+        "channel_name": snippet.get("channelTitle"),
+    }
