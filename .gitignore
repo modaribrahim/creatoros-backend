@@ -18,3 +18,7 @@ build/
 *.swp
 .idea/
 .vscode/
+
+# production secrets
+.env.*
+!.env.production.example

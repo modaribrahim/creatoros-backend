@@ -1,0 +1,50 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    environment: &appenv
+      # Point at your existing managed services (Neon / Upstash) — same URLs
+      # the app used on Render. No migration needed.
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM: ${RESEND_FROM:-CreatorOS <onboarding@resend.dev>}
+      ANALYZE_MODEL: ${ANALYZE_MODEL:-deepseek/deepseek-v4-flash-0731}
+      EMBED_MODEL: ${EMBED_MODEL:-openai/text-embedding-3-small}
+      MAX_COMMENTS: ${MAX_COMMENTS:-300}
+      AUTO_CREATE_TABLES: "true"
+    ports:
+      # Internal only — Caddy terminates TLS and proxies to here.
+      - "127.0.0.1:8000:8000"
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: celery -A app.services.jobs:celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=25
+    environment: *appenv
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+      API_PORT: "8000"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
